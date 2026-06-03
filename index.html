@@ -739,32 +739,32 @@ function renderToday(){
     return;
   }
 
-  // AI Brief card (shown with cached or loading state)
-  const savedBrief = (_briefDate===TODAY() && _briefGenerated) ? _briefGenerated : null;
-  const briefHTML = `
-    <div class="ai-brief-card" id="aiBriefCard">
-      <div class="ai-badge">&#129302; Gemini AI · Daily Health Brief</div>
-      <div class="ai-brief-text" id="aiBriefText">
-        ${savedBrief
-          ? savedBrief.replace(/\n/g,'<br/>')
-          : '<div class="ai-loading"><span></span><span></span><span></span></div><span style="font-size:12px;opacity:.8">Analysing your family\'s health data...</span>'}
-      </div>
-      <div class="ai-brief-footer">
-        <span style="font-size:10px;opacity:.7">Updated today</span>
-        <button class="ai-refresh-btn" onclick="refreshBrief()">&#8635; Refresh</button>
-      </div>
-    </div>`;
+  // AI Brief — build as string then inject
+  const savedBrief = (_briefDate === TODAY() && _briefGenerated) ? _briefGenerated : '';
+  const briefInner = savedBrief
+    ? savedBrief.replace(/\n/g,'<br/>')
+    : '<div class="ai-loading"><span></span><span></span><span></span></div> <span style="font-size:12px;opacity:.8">Analysing your family health data...</span>';
 
-  // Generate brief in background if not cached
-  if(!savedBrief && getKey()){ generateAIBrief().then(text=>{ const el=document.getElementById('aiBriefText'); if(el&&text) el.innerHTML=text.replace(/\n/g,'<br/>'); }); }
+  // Generate brief async if not cached
+  if(!savedBrief && getKey()){
+    generateAIBrief().then(function(text){
+      var el = document.getElementById('aiBriefText');
+      if(el && text) el.innerHTML = text.replace(/\n/g,'<br/>');
+    });
+  }
 
-  let html = `
-    <div class="date-header">
-      <div><div class="date-title">${now.toLocaleDateString('en-IN',{weekday:'long'})}</div>
-      <div class="date-sub">${now.toLocaleDateString('en-IN',{day:'numeric',month:'long'})}</div></div>
-    </div>
-    ${briefHTML}
-    <div class="adherence-bar-wrap">
+  let html = '<div class="date-header"><div>'
+    + '<div class="date-title">' + now.toLocaleDateString('en-IN',{weekday:'long'}) + '</div>'
+    + '<div class="date-sub">' + now.toLocaleDateString('en-IN',{day:'numeric',month:'long'}) + '</div>'
+    + '</div></div>'
+    + '<div class="ai-brief-card" id="aiBriefCard">'
+    + '<div class="ai-badge">&#129302; Gemini AI &middot; Daily Health Brief</div>'
+    + '<div class="ai-brief-text" id="aiBriefText">' + briefInner + '</div>'
+    + '<div class="ai-brief-footer"><span style="font-size:10px;opacity:.7">Updated today</span>'
+    + '<button class="ai-refresh-btn" onclick="refreshBrief()">&#8635; Refresh</button></div>'
+    + '</div>';
+
+  html += `<div class="adherence-bar-wrap">
       <div class="adherence-numbers">
         <div class="adh-big" style="color:${pctColor}">${takenDoses}</div>
         <div class="adh-total">/ ${totalDoses} doses</div>
