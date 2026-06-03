@@ -277,8 +277,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <div class="form-group">
       <label class="form-label">&#128247; Scan Medicine (AI reads label automatically)</label>
       <div class="photo-upload" id="photoUpload" onclick="document.getElementById('medPhoto').click()">
-        <input type="file" id="medPhoto" accept="image/*" capture="environment" style="display:none" onchange="handleMedPhoto(this)" />
-        <div id="photoLabel">&#128247; Tap to take photo or upload image<br/><span style="font-size:11px;color:var(--muted)">AI will read the medicine name and dosage</span></div>
+        <input type="file" id="medPhoto" accept="image/*,.pdf,application/pdf" style="display:none" onchange="handleMedPhoto(this)" />
+        <div id="photoLabel">&#128247; Upload photo or PDF prescription<br/><span style="font-size:11px;color:var(--muted)">AI reads all medicines automatically — JPG, PNG, PDF</span></div>
         <img id="photoPreview" class="photo-preview" style="display:none" />
         <div class="scan-overlay" id="scanOverlay">
           <div class="scan-line"></div>
@@ -697,29 +697,69 @@ If only one medicine found, still return as array with one item.`}
     }
 
     if(meds.length > 0){
-      if(meds.length === 1){
-        // Pre-fill form with single medicine
-        prefillMedForm(meds[0]);
-        result.innerHTML = '<strong style="color:var(--health)">&#10003; Found: '+meds[0].name+(meds[0].dose?' · '+meds[0].dose:'')+'</strong> — Form filled below. Please verify.';
-      } else {
-        // Multiple medicines — show picker
-        result.innerHTML = '<strong style="color:var(--health)">&#10003; Found '+meds.length+' medicines</strong> — tap one to fill the form:'
-          + '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">'
-          + meds.map(function(m,i){
-            return '<button onclick="pickScannedMed('+i+')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:8px 12px;text-align:left;cursor:pointer;font-size:12px;font-weight:600">'
-              + m.name + (m.dose?' <span style="color:var(--muted);font-weight:400">· '+m.dose+'</span>':'')
-              + ' <span style="color:var(--muted);font-size:11px">'+m.timing+'</span></button>';
-          }).join('')
+      window._scannedMeds = meds;
+      var memberSel = document.getElementById('med-member');
+      var memberName = memberSel ? memberSel.options[memberSel.selectedIndex]?.text : '';
+      var blocks = meds.map(function(m, i){
+        var tid = 'sct_'+i; var fid = 'scf_'+i;
+        var timingOpts = ['Morning','Afternoon','Evening','Night'];
+        var foodOpts = ['Before food','After food','Empty stomach','With water'];
+        var tPills = timingOpts.map(function(t){
+          var sel = (m.timing||'').toLowerCase().includes(t.toLowerCase()) ? 'selected' : '';
+          return '<div class="pill '+sel+'" data-val="'+t+'" onclick="togglePill(this)" style="font-size:11px;padding:5px 10px">'+t+'</div>';
+        }).join('');
+        var fPills = foodOpts.map(function(f){
+          var w = f.split(' ')[0].toLowerCase();
+          var sel = (m.food||'').toLowerCase().includes(w) ? 'selected' : '';
+          return '<div class="pill '+sel+'" data-val="'+f+'" onclick="togglePill(this)" style="font-size:11px;padding:5px 10px">'+f+'</div>';
+        }).join('');
+        return '<div id="scblock_'+i+'" style="background:var(--surface);border:1.5px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px">'
+          + '<div style="display:flex;gap:8px;margin-bottom:8px">'
+          + '<input id="scn_'+i+'" value="'+escHtml(m.name||'')+'" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-weight:700;font-family:inherit" placeholder="Medicine name"/>'
+          + '<input id="scd_'+i+'" value="'+escHtml(m.dose||'')+'" style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12px;font-family:inherit" placeholder="Dose"/>'
+          + '</div>'
+          + '<div id="'+tid+'" class="pill-group" style="margin-bottom:6px">'+tPills+'</div>'
+          + '<div id="'+fid+'" class="pill-group" style="margin-bottom:10px">'+fPills+'</div>'
+          + (m.notes?'<div style="font-size:11px;color:var(--muted);margin-bottom:8px">'+escHtml(m.notes)+'</div>':'')
+          + '<button onclick="addScannedMed('+i+')" style="width:100%;background:linear-gradient(135deg,#0EA5E9,#0284C7);color:#fff;border:none;padding:9px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">+ Add to '+memberName+'</button>'
           + '</div>';
-        window._scannedMeds = meds;
-      }
+      }).join('');
+      result.innerHTML = '<div style="font-weight:700;color:var(--health);margin-bottom:8px">&#10003; Found '+meds.length+' medicine'+(meds.length>1?'s':'')+' — review and add each:</div>' + blocks;
     } else {
-      result.innerHTML = '&#129302; AI could not read this image clearly. Please fill in the medicine details manually below.';
+      result.innerHTML = '&#129302; AI could not read this clearly. Fill manually below.';
     }
   } catch(e){
     upload.classList.remove('scanning');
     result.innerHTML = '&#129302; Scanning failed: '+e.message+'. Please fill manually below.';
   }
+}
+
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+function addScannedMed(i){
+  var memberId = document.getElementById('med-member')?.value;
+  if(!memberId){ showToast('Select a family member first'); return; }
+  var name = document.getElementById('scn_'+i)?.value?.trim();
+  var dose = document.getElementById('scd_'+i)?.value?.trim();
+  if(!name){ showToast('Enter medicine name'); return; }
+  var timing = [];
+  document.querySelectorAll('#sct_'+i+' .pill.selected').forEach(function(p){ timing.push(p.dataset.val); });
+  var food = [];
+  document.querySelectorAll('#scf_'+i+' .pill.selected').forEach(function(p){ food.push(p.dataset.val); });
+  if(!timing.length) timing = ['Morning'];
+  var meds = DB.get('medicines')||[];
+  meds.push({ id:Date.now()+'_'+i, memberId:memberId, name:name, dose:dose||'', timing:timing, food:food, start:TODAY(), end:'', notes:'', active:true });
+  DB.set('medicines', meds);
+  // Mark block as done
+  var block = document.getElementById('scblock_'+i);
+  if(block){
+    block.style.borderColor='var(--health)';
+    block.style.background='#F0FDF4';
+    block.querySelector('button').innerHTML='&#10003; Added — '+name;
+    block.querySelector('button').disabled=true;
+    block.querySelector('button').style.background='var(--health)';
+  }
+  showToast(name+' added!');
 }
 
 function prefillMedForm(med){
