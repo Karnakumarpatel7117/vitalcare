@@ -353,14 +353,15 @@ const DB = {
 const TODAY = () => new Date().toISOString().slice(0,10);
 const getKey = () => localStorage.getItem('vc_gemini_key')||'';
 
-// ═══ INIT ═══
-(()=>{
-  const d = new Date();
+// ═══ INIT (runs after all functions declared) ═══
+var currentView = 'today'; // var hoisted — must be before switchView call
+document.addEventListener('DOMContentLoaded', function(){
+  var d = new Date();
   document.getElementById('headerDate').innerHTML = d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
   setInterval(checkAlerts, 60000);
   checkAlerts();
   switchView('today');
-})();
+});
 
 // ═══ TOAST ═══
 function showToast(msg){
@@ -394,7 +395,6 @@ async function saveSetup(){
 }
 
 // ═══ NAV ═══
-let currentView = 'today';
 function switchView(v){
   currentView = v;
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
