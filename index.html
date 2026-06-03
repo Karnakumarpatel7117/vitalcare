@@ -410,20 +410,40 @@ function switchView(v){
 // ═══ GEMINI API CALL ═══
 async function callGemini(prompt, context=''){
   const key = getKey();
-  if(!key) return null;
-  const model = localStorage.getItem('vc_model')||'gemini-1.5-flash';
-  try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        contents:[{parts:[{text: (context?context+'\n\n':'')+prompt}]}],
-        generationConfig:{temperature:.7,maxOutputTokens:400}
-      })
-    });
-    if(!r.ok) return null;
-    const d = await r.json();
-    return d.candidates?.[0]?.content?.parts?.[0]?.text || null;
-  } catch(e){ return null; }
+  if(!key) throw new Error('NO_KEY');
+  // Try multiple models — find one that works
+  const savedModel = localStorage.getItem('vc_model');
+  const MODELS = savedModel
+    ? [savedModel, 'gemini-1.5-flash', 'gemini-1.0-pro']
+    : ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.0-pro'];
+  const body = JSON.stringify({
+    contents:[{parts:[{text: (context?context+'\n\n':'')+prompt}]}],
+    generationConfig:{temperature:.7, maxOutputTokens:400}
+  });
+  let lastErr = '';
+  for(const model of MODELS){
+    try {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent?key='+key,{
+        method:'POST', headers:{'Content-Type':'application/json'}, body
+      });
+      if(r.status === 429){ lastErr='Rate limit — wait 30s and retry'; continue; }
+      if(r.status === 404){ lastErr='Model '+model+' not found'; continue; }
+      if(!r.ok){
+        const errBody = await r.text();
+        lastErr = 'API error '+r.status+': '+errBody.slice(0,100);
+        if(r.status === 400 || r.status === 403) break; // bad key — no point retrying
+        continue;
+      }
+      const d = await r.json();
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+      if(text){
+        if(!savedModel) localStorage.setItem('vc_model', model);
+        return text;
+      }
+      lastErr = 'Empty response from '+model;
+    } catch(e){ lastErr = e.message; }
+  }
+  throw new Error(lastErr || 'All models failed');
 }
 
 function getFamilyContext(){
@@ -460,9 +480,11 @@ async function generateAIBrief(force=false){
   if(!key) return null;
   const ctx = getFamilyContext();
   const prompt = `You are VitalCare AI, a family medicine assistant. Based on this family's medicine adherence data, write a warm, caring 2-sentence daily health briefing. Be specific about who needs attention. Use simple language. End with one actionable tip. Keep under 60 words.\n\nFamily data:\n${ctx}\n\nToday: ${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})}`;
-  const text = await callGemini(prompt);
-  if(text){ _briefGenerated=text; _briefDate=today; }
-  return text;
+  try {
+    const text = await callGemini(prompt);
+    if(text){ _briefGenerated=text; _briefDate=today; }
+    return text;
+  } catch(e){ return null; }
 }
 
 // ═══ ASK AI VIEW ═══
@@ -518,10 +540,23 @@ async function sendAIMsg(){
   // Show typing
   _aiMessages.push({role:'bot',text:'&#8226;&#8226;&#8226;'});
   renderAskAI();
-  const ctx = `You are VitalCare AI assistant. Family medicine data:\n${getFamilyContext()}\n\nAnswer this question helpfully and concisely (max 80 words). Be specific and actionable. Today: ${new Date().toLocaleDateString('en-IN')}`;
-  const reply = await callGemini(q, ctx) || "I'm here to help but need a Gemini API key first. Tap Setup (⚙️) to add one.";
+  const ctx = 'You are VitalCare AI assistant. Family medicine data:\n'+getFamilyContext()+'\n\nAnswer helpfully and concisely (max 80 words). Be specific. Today: '+new Date().toLocaleDateString('en-IN');
+  let reply;
+  try {
+    reply = await callGemini(q, ctx);
+  } catch(e) {
+    if(e.message === 'NO_KEY'){
+      reply = '&#128273; No API key found. Tap &#9881; Setup to add your free Gemini key from aistudio.google.com';
+    } else if(e.message.includes('429') || e.message.includes('Rate limit')){
+      reply = '&#9203; Rate limit hit. Wait 30 seconds and try again.';
+    } else if(e.message.includes('400') || e.message.includes('403')){
+      reply = '&#128273; Invalid API key. Tap &#9881; Setup and re-enter your Gemini key.';
+    } else {
+      reply = '&#10006; Error: '+e.message+'. Check your key in &#9881; Setup.';
+    }
+  }
   _aiMessages.pop(); // remove typing
-  _aiMessages.push({role:'bot',text:reply});
+  _aiMessages.push({role:'bot', text: reply});
   renderAskAI();
   document.getElementById('aiMessages')?.scrollTo(0,99999);
 }
